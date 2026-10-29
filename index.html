@@ -90,22 +90,24 @@ function authView(){
   show(...k);
 }
 
+const inApp=/FBAN|FBAV|FB_IAB|Messenger|Instagram|Line\//i.test(navigator.userAgent);
+function inNote(){return inApp?h("div",{className:"c",style:"border-color:#c9a45c"},h("b",{},"Important : "),"ouvre ce lien dans Chrome (⋮ en haut à droite, puis « Ouvrir dans le navigateur ») pour que la photo et le micro marchent."):""}
 const RULES=["J'ai 18 ans ou plus. Les mineurs sont bannis tout de suite.","Le consentement est obligatoire. Un « non » est un « non ».","Je respecte les autres : ni insultes, ni menaces, ni harcèlement.","Aucune photo ou vidéo d'une personne sans son accord. Aucune capture d'écran ni enregistrement.","Discrétion totale : ce qui est dit ici reste ici.","Pas de faux profil, pas de demande d'argent, pas de vente ni de publicité.","Aucun contenu qui concerne des mineurs, de la violence ou des choses illégales.","Le gérant peut refuser ou bannir sans donner de raison."];
 function rulesView(){const bx=RULES.map(()=>h("input",{type:"checkbox"})),go=h("button",{disabled:true,onclick:()=>signupView()},"Continuer");
   bx.forEach(x=>x.onchange=()=>{go.disabled=!bx.every(y=>y.checked)});
-  show(h("img",{src:LOGO,alt:"LiMada.mg",className:"logo",style:"width:150px"}),h("h1",{},"Règles du groupe"),h("p",{className:"m"},"Lisez et cochez chaque règle pour continuer."),
+  show(h("img",{src:LOGO,alt:"LiMada.mg",className:"logo",style:"width:150px"}),inNote(),h("h1",{},"Règles du groupe"),h("p",{className:"m"},"Lisez et cochez chaque règle pour continuer."),
     h("div",{className:"c"},...RULES.map((r,i)=>h("label",{style:"font-weight:400;display:flex;gap:8px;align-items:flex-start"},bx[i],r)),go,h("button",{className:"alt",onclick:authView},"Retour")))}
 async function refuse(id){const r=prompt("Motif du refus ou du bannissement (pour ton suivi) :");if(r===null)return;
   const {error}=await sb.from("profiles").update({status:"banned",refuse_reason:r.trim().slice(0,300)}).eq("id",id);if(error)alert(error.message);adminView()}
 function signupView(){
-  let voice=null,rec;
+  let voice=null,rec,uid=null;
   const f={};["pseudo","email","password","fb_link","fb_name"].forEach(n=>f[n]=h("input",{type:n==="password"?"password":n==="email"?"email":"text",autocomplete:"off"}));
   f.sexe=h("select",{},...["","Femme","Homme"].map(x=>h("option",{value:x},x||"Choisir…")));
   f.dob=h("input",{type:"date"});
   f.why=h("select",{},...["","Faire des rencontres entre adultes","Discuter en toute discrétion","Trouver un couple ou un partenaire libertin","Autre raison"].map(x=>h("option",{value:x},x||"Choisir…")));
   f.about=h("textarea",{rows:3});f.q_libertin=h("textarea",{rows:3});f.q_consent=h("textarea",{rows:3});
   f.situation=h("select",{},...["","Seul(e)","En couple"].map(x=>h("option",{value:x},x||"Choisir…")));
-  const rules=h("input",{type:"checkbox"}),selfie=h("input",{type:"file",accept:"image/*",capture:"user"});
+  const rules=h("input",{type:"checkbox"}),selfie=h("input",{type:"file",accept:"image/*"});
   const aud=h("audio",{controls:true,style:"width:100%;display:none"}),er=h("div",{className:"e"});
   const rb=h("button",{className:"alt",type:"button"},"🎤 Enregistrer (15 s max)");
   rb.onclick=async()=>{
@@ -130,15 +132,19 @@ function signupView(){
     if(!selfie.files[0])return er.textContent="Ajoutez votre selfie.";
     if(!voice)return er.textContent="Enregistrez votre vocal.";
     send.disabled=true;
-    const {data,error}=await sb.auth.signUp({email:v("email"),password:f.password.value,options:{data:{invite:INV,pseudo:v("pseudo"),sexe:f.sexe.value,dob:f.dob.value,fb_link:v("fb_link"),fb_name:v("fb_name"),why:f.why.value,about:v("about"),situation:f.situation.value,q_libertin:v("q_libertin"),q_consent:v("q_consent")}}});
-    if(error||!data.session){send.disabled=false;return er.textContent=error?"Invitation invalide, ou email déjà utilisé.":"Désactivez « Confirm email » dans Supabase."}
-    const id=data.user.id;
-    const a=await sb.storage.from("docs").upload(id+"/selfie",selfie.files[0],{upsert:true});
-    const b=await sb.storage.from("docs").upload(id+"/voice",voice,{upsert:true,contentType:voice.type});
-    if(a.error||b.error)er.textContent="Photo ou vocal non envoyé. Contactez le gérant.";
+    if(!uid){
+      const {data,error}=await sb.auth.signUp({email:v("email"),password:f.password.value,options:{data:{invite:INV,pseudo:v("pseudo"),sexe:f.sexe.value,dob:f.dob.value,fb_link:v("fb_link"),fb_name:v("fb_name"),why:f.why.value,about:v("about"),situation:f.situation.value,q_libertin:v("q_libertin"),q_consent:v("q_consent")}}});
+      if(error||!data.session){send.disabled=false;return er.textContent=error?"Invitation invalide, ou email déjà utilisé.":"Désactivez « Confirm email » dans Supabase."}
+      uid=data.user.id}
+    let img=selfie.files[0];
+    try{const bl=await fit(img,1280);if(bl)img=bl}catch(x){}
+    const a=await sb.storage.from("docs").upload(uid+"/selfie",img,{upsert:true,contentType:img.type||"image/jpeg"});
+    const b=await sb.storage.from("docs").upload(uid+"/voice",voice,{upsert:true,contentType:voice.type||"audio/webm"});
+    if(a.error||b.error){send.disabled=false;send.textContent="Réessayer l'envoi";
+      return er.textContent=(a.error?"Photo non envoyée : "+a.error.message+". ":"")+(b.error?"Vocal non envoyé : "+b.error.message+". ":"")+"Ton compte est créé. Appuie sur « Réessayer l'envoi »."}
     start();
   }},"Envoyer ma demande");
-  show(h("img",{src:LOGO,alt:"LiMada.mg",className:"logo",style:"width:150px"}),h("h1",{},"Rejoindre LiMada.mg"),h("div",{className:"c"},
+  show(h("img",{src:LOGO,alt:"LiMada.mg",className:"logo",style:"width:150px"}),inNote(),h("h1",{},"Rejoindre LiMada.mg"),h("div",{className:"c"},
     field("Pseudo (visible)",f.pseudo),field("Vous êtes",f.sexe),field("Date de naissance",f.dob),
     field("Email",f.email),field("Mot de passe",f.password),
     field("Lien de votre profil Facebook (vu seulement par le gérant)",f.fb_link),field("Nom affiché sur ce Facebook",f.fb_name),
