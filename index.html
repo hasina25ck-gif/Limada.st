@@ -55,6 +55,8 @@ img.s{width:100%;max-height:260px;object-fit:cover;border-radius:12px;margin-top
 .post .wm{position:absolute;inset:0;pointer-events:none}
 .post .ac{display:flex;gap:18px;padding:8px 12px}.post .ac button{background:none;border:0;color:var(--ink);margin:0;padding:4px 0;font-size:16px;font-weight:400}
 .post .cp{padding:0 12px 10px;font-size:15px}.post .cm{padding:6px 12px;border-top:1px solid var(--line);font-size:14px}
+.tb{position:relative}.nb{position:absolute;top:2px;left:calc(50% + 6px);background:var(--acc);color:#fff;border-radius:999px;font-size:11px;padding:1px 6px;display:none}
+.toast{position:fixed;top:12px;left:50%;transform:translateX(-50%);width:min(440px,92%);background:var(--card);border:1px solid var(--gold);color:var(--ink);border-radius:14px;padding:12px 16px;z-index:200;cursor:pointer;box-shadow:0 6px 24px #000}
 </style></head><body><div class="w" id="app"></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <script>window.supabase||document.write('<script src="https://unpkg.com/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"><\/script>')</script>
@@ -67,7 +69,7 @@ const app=document.getElementById("app");let timer,me,box;
 function h(t,p,...k){const e=Object.assign(document.createElement(t),p||{});k.flat().forEach(x=>e.append(x));return e}
 function show(...n){clearInterval(timer);app.className="w";app.replaceChildren(...n)}
 function field(l,el){return [h("label",{},l),el]}
-const out=()=>h("button",{className:"alt",onclick:async()=>{await sb.auth.signOut();showAdm=false;taps=0;tab="home";start()}},"Déconnexion");
+const out=()=>h("button",{className:"alt",onclick:async()=>{await sb.auth.signOut();showAdm=false;taps=0;tab="home";seenN=null;unreadN=0;start()}},"Déconnexion");
 
 async function start(){
   const {data:{session}}=await sb.auth.getSession();
@@ -163,16 +165,28 @@ async function loadMembers(){
 }
 function ava(id,size){const m=mem[id]||{},d=h("div",{className:"av",style:"width:"+size+"px;height:"+size+"px;font-size:"+(size/2.2)+"px"});
   if(av[id])d.append(h("img",{src:av[id]}));else d.textContent=(m.pseudo||"?")[0].toUpperCase();if(online(id))d.append(h("span",{className:"dot"}));return d}
-function online(id){if(id===me.id)return me.show_online!==false;const m=mem[id];return !!(m&&m.last_seen&&Date.now()-new Date(m.last_seen)<150000)}
+let curThread=null,seenN=null,unreadN=0;
+function toast(t,fn){const d=h("div",{className:"toast",onclick:()=>{d.remove();fn&&fn()}},t);document.body.append(d);setTimeout(()=>d.remove(),6000);if(navigator.vibrate)navigator.vibrate(150)}
+async function checkNew(){
+  if(!me)return;
+  const {data}=await sb.from("dms").select("id,sender,body").eq("receiver",me.id).eq("read",false).order("created_at",{ascending:false}).limit(50);
+  if(!data)return;unreadN=data.length;
+  const bd=document.getElementById("badgeDm");if(bd){bd.textContent=unreadN>9?"9+":String(unreadN);bd.style.display=unreadN?"block":"none"}
+  document.title=(unreadN?"("+unreadN+") ":"")+"LiMada.mg";
+  if(seenN===null){seenN=new Set(data.map(d=>d.id));return}
+  data.filter(d=>!seenN.has(d.id)).forEach(d=>{seenN.add(d.id);
+    if(d.sender!==curThread)toast("💬 "+((mem[d.sender]||{}).pseudo||"Un membre")+" : "+String(d.body).slice(0,40),()=>{openId=d.sender;tab="dm";mainView()})})}
+function online(id){if(id===me.id)return me.show_online!==false;const m=mem[id];return !!(m&&m.last_seen&&Date.now()-new Date(m.last_seen)<180000)}
 function ago(t){const m=Math.max(0,Math.floor((Date.now()-new Date(t))/60000));return m<60?m+" min":Math.floor(m/60)+" h"}
 function mainView(){
   const body=h("div",{className:"main"}),st=h("div",{id:"stories",className:"stories"}),nav=h("div",{className:"tabbar"});box=body;
   const tabs=[["home","🏠","Accueil"],["dm","💬","Messages"],["grp","👥","Groupe"],["me","👤","Profil"]];if(me.is_admin&&showAdm)tabs.push(["adm","🛡️","Gérant"]);tabs.push(["set","⚙️","Paramètres"]);
-  tabs.forEach(t=>nav.append(h("button",{className:"tb"+(t[0]===tab?" on":""),onclick:()=>{tab=t[0];mainView()}},h("span",{},t[1]),h("small",{},t[2]))));
+  tabs.forEach(t=>nav.append(h("button",{className:"tb"+(t[0]===tab?" on":""),onclick:()=>{tab=t[0];mainView()}},h("span",{},t[1]),h("small",{},t[2]),t[0]==="dm"?h("b",{id:"badgeDm",className:"nb",style:"display:"+(unreadN?"block":"none")},unreadN>9?"9+":String(unreadN)):"")));
   app.className="w mv";app.replaceChildren(h("div",{className:"bar",style:"justify-content:center"},h("b",{style:"cursor:pointer",onclick:()=>{if(!me.is_admin)return;if(showAdm){showAdm=false;taps=0;if(tab==="adm")tab="grp";mainView()}else if(++taps>=3){showAdm=true;mainView()}}},h("img",{src:LOGO,alt:"LiMada.mg",style:"height:56px;vertical-align:middle"}))),st,body,nav);
-  clearInterval(timer);sb.rpc("ping");
-  loadMembers().then(()=>{loadStories();({home:homeView,grp:chatView,dm:convView,me:profView,adm:adminView,set:setView}[tab])(body)});
-  if(!window._pt)window._pt=setInterval(async()=>{sb.rpc("ping");await loadMembers();loadStories()},60000);
+  clearInterval(timer);curThread=null;sb.rpc("ping");
+  loadMembers().then(()=>{loadStories();checkNew();({home:homeView,grp:chatView,dm:convView,me:profView,adm:adminView,set:setView}[tab])(body)});
+  if(!window._pt){window._pt=setInterval(async()=>{sb.rpc("ping");await loadMembers();loadStories()},30000);window._nt=setInterval(checkNew,8000);
+    document.addEventListener("visibilitychange",()=>{if(!document.hidden&&me){sb.rpc("ping");loadMembers();checkNew()}})}
 }
 async function loadStories(){
   const bar=document.getElementById("stories");if(!bar)return;
@@ -311,6 +325,7 @@ async function chatView(b){
 }
 
 async function convView(b){
+  curThread=null;
   if(openId){const o=openId;openId=null;return threadView(b,o)}
   const [{data},{data:ch}]=await Promise.all([sb.from("dms").select(D).order("created_at",{ascending:false}).limit(300),sb.from("chats").select("other,created_at")]);
   const seen={},rows=[];
@@ -319,11 +334,13 @@ async function convView(b){
     if(d.receiver===me.id&&!d.read)seen[o].unread++});
   (ch||[]).forEach(c=>{if(!seen[c.other]){seen[c.other]={o:c.other,last:null,unread:0,t:c.created_at};rows.push(seen[c.other])}});
   rows.sort((x,y)=>new Date(y.t)-new Date(x.t));
+  const onl=Object.keys(mem).filter(i=>i!==me.id&&online(i));
+  const strip=h("div",{className:"stories"},...(onl.length?onl.map(i=>h("div",{className:"sc",onclick:()=>threadView(b,i)},ava(i,52),h("span",{},mem[i].pseudo))):[h("span",{className:"m"},"Personne d'autre en ligne pour le moment.")]));
   const row=r=>h("div",{className:"row2",onclick:()=>threadView(b,r.o)},ava(r.o,46),
     h("div",{style:"flex:1;min-width:0"},h("b",{},(mem[r.o]||{}).pseudo||"Ancien membre"),h("div",{className:"m ell"},r.last?(r.last.sender===me.id?"Vous : ":"")+r.last.body:"Nouvelle discussion")),
     r.unread?h("span",{className:"bd"},String(r.unread)):"");
   b.replaceChildren(h("div",{className:"ph"},h("h2",{style:"margin:0"},"Messages"),h("button",{className:"fab",onclick:()=>pickMember(b)},"+")),
-    ...(rows.length?rows.map(row):[h("p",{className:"m"},"Aucune discussion. Appuie sur + pour écrire à un membre.")]));
+    h("div",{className:"m"},"🟢 En ligne maintenant ("+onl.length+")"),strip,h("div",{className:"m",style:"margin-top:6px"},"Discussions"),...(rows.length?rows.map(row):[h("p",{className:"m"},"Aucune discussion. Appuie sur + pour écrire à un membre.")]));
   clearInterval(timer);timer=setInterval(()=>convView(b),5000);
 }
 function pickMember(b){const ov=h("div",{className:"ov",onclick:e=>{if(e.target===ov)ov.remove()}});
@@ -333,6 +350,7 @@ function pickMember(b){const ov=h("div",{className:"ov",onclick:e=>{if(e.target=
   ov.append(c);document.body.append(ov)}
 
 async function threadView(b,o){
+  curThread=o;
   sb.from("chats").upsert({owner:me.id,other:o},{onConflict:"owner,other",ignoreDuplicates:true}).then(()=>{},()=>{});
   const list=h("div",{className:"msgs"}),inp=h("input",{placeholder:"Écrire un message…",maxLength:1000}),R=replyBox(),MP=mediaPick();let first=true;last=[];
   const send=async()=>{const x=await build(inp,MP);if(!x)return;inp.value="";MP.clear();
